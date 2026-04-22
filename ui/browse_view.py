@@ -5,6 +5,59 @@ from tkinter import ttk, filedialog, messagebox
 from utils.time_utils import TimeUtils
 
 
+class EditProjectDialog(tk.Toplevel):
+    def __init__(self, parent, app, detail: dict, on_saved):
+        super().__init__(parent)
+        self.title("プロジェクト編集")
+        self.resizable(False, False)
+        self.app = app
+        self.detail = detail
+        self.on_saved = on_saved
+
+        self.project_name_var = tk.StringVar(value=detail.get("project_name", ""))
+
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+
+        ttk.Label(body, text="プロジェクト名").grid(row=0, column=0, sticky="w")
+        ttk.Entry(body, textvariable=self.project_name_var, width=60).grid(
+            row=1, column=0, sticky="we", pady=(0, 8)
+        )
+
+        ttk.Label(body, text="説明文").grid(row=2, column=0, sticky="w")
+        self.desc_text = tk.Text(body, width=60, height=8)
+        self.desc_text.grid(row=3, column=0, sticky="we", pady=(0, 8))
+        self.desc_text.insert("1.0", detail.get("description", ""))
+
+        btns = ttk.Frame(body)
+        btns.grid(row=4, column=0, sticky="e", pady=(8, 0))
+        ttk.Button(btns, text="保存", command=self.save).pack(side="left", padx=4)
+        ttk.Button(btns, text="閉じる", command=self.destroy).pack(side="left", padx=4)
+
+        body.columnconfigure(0, weight=1)
+
+        self.transient(parent)
+        self.grab_set()
+
+    def save(self):
+        project_name = self.project_name_var.get().strip()
+        description = self.desc_text.get("1.0", tk.END).strip()
+
+        try:
+            self.app.project_service.update_project_info(
+                project_path=self.detail["project_path"],
+                project_name=project_name,
+                description=description,
+            )
+        except Exception as e:
+            messagebox.showerror("更新エラー", str(e))
+            return
+
+        messagebox.showinfo("完了", "プロジェクト情報を更新しました")
+        self.on_saved()
+        self.destroy()
+
+
 class BrowseView(ttk.Frame):
     SORT_OPTIONS = {
         "更新日 ↓": "updated_desc",
@@ -73,7 +126,10 @@ class BrowseView(ttk.Frame):
         file_btns = ttk.Frame(right)
         file_btns.pack(fill="x")
         ttk.Button(file_btns, text="ファイル取得", command=self.download_selected_file).pack(side="left", padx=(0, 4))
-        ttk.Button(file_btns, text="フォルダを開く", command=self.open_project_folder).pack(side="left")
+        ttk.Button(file_btns, text="フォルダを開く", command=self.open_project_folder).pack(side="left", padx=(0, 4))
+        ttk.Button(file_btns, text="ZIP出力", command=self.export_zip).pack(side="left", padx=(0, 4))
+        ttk.Button(file_btns, text="編集", command=self.edit_project).pack(side="left", padx=(0, 4))
+        ttk.Button(file_btns, text="削除", command=self.delete_project).pack(side="left")
 
     def refresh_list(self):
         try:
@@ -124,7 +180,7 @@ class BrowseView(ttk.Frame):
 
         self.file_list.delete(0, tk.END)
         for file_info in detail.get("files", []):
-            text = f"{file_info['file_name']} ({file_info['size']} bytes)"
+            text = f"{file_info['relative_path']} ({file_info['size']} bytes)"
             self.file_list.insert(tk.END, text)
 
     def clear_detail(self):
@@ -146,7 +202,7 @@ class BrowseView(ttk.Frame):
 
         file_info = self.current_detail["files"][selection[0]]
         project_path = Path(self.current_detail["project_path"])
-        src_file = project_path / file_info["relative_path"]
+        src_file = project_path / Path(file_info["relative_path"])
 
         default_dir = self.app.config.get("default_download_path", str(Path.home() / "Downloads"))
         dest_dir = filedialog.askdirectory(title="保存先を選択", initialdir=default_dir)
@@ -168,3 +224,71 @@ class BrowseView(ttk.Frame):
             self.app.project_service.file_service.open_folder(Path(self.current_detail["project_path"]))
         except Exception as e:
             messagebox.showerror("フォルダ表示エラー", str(e))
+
+    def export_zip(self):
+        if not self.current_detail:
+            messagebox.showwarning("未選択", "プロジェクトを選択してください")
+            return
+
+        project_name = self.current_detail.get("project_name", "project")
+        default_dir = self.app.config.get("default_download_path", str(Path.home() / "Downloads"))
+
+        zip_path = filedialog.asksaveasfilename(
+            title="ZIP保存先を選択",
+            initialdir=default_dir,
+            initialfile=f"{project_name}.zip",
+            defaultextension=".zip",
+            filetypes=[("ZIP files", "*.zip")],
+        )
+        if not zip_path:
+            return
+
+        try:
+            self.app.project_service.file_service.export_project_to_zip(
+                Path(self.current_detail["project_path"]),
+                Path(zip_path),
+            )
+            messagebox.showinfo("完了", f"ZIPを出力しました\n{zip_path}")
+        except Exception as e:
+            messagebox.showerror("ZIP出力エラー", str(e))
+
+    def edit_project(self):
+        if not self.current_detail:
+            messagebox.showwarning("未選択", "プロジェクトを選択してください")
+            return
+
+        EditProjectDialog(self, self.app, self.current_detail, self._reload_current_project)
+
+    def delete_project(self):
+        if not self.current_detail:
+            messagebox.showwarning("未選択", "プロジェクトを選択してください")
+            return
+
+        project_name = self.current_detail.get("project_name", "")
+        answer = messagebox.askyesno(
+            "削除確認",
+            f"プロジェクトを削除しますか？\n\n{project_name}\n\n※ 完全削除ではなく trash フォルダへ移動します。"
+        )
+        if not answer:
+            return
+
+        try:
+            trash_path = self.app.project_service.delete_project(self.current_detail["project_path"])
+            messagebox.showinfo("削除完了", f"trash に移動しました\n{trash_path}")
+            self.refresh_list()
+        except Exception as e:
+            messagebox.showerror("削除エラー", str(e))
+
+    def _reload_current_project(self):
+        current_project_path = self.current_detail["project_path"] if self.current_detail else None
+        self.refresh_list()
+
+        if not current_project_path:
+            return
+
+        for idx, item in enumerate(self.projects):
+            if item.get("project_path") == current_project_path:
+                self.project_list.selection_set(idx)
+                self.project_list.activate(idx)
+                self.on_select_project()
+                break

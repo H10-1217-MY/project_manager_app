@@ -68,6 +68,40 @@ class IndexService:
         finally:
             self.release_lock()
 
+    def update_project(self, project_id: str, project_name: str, description: str, updated_at: str):
+        self.acquire_lock()
+        try:
+            index_data = self.load_index()
+            found = False
+
+            for item in index_data:
+                if item.get("project_id") == project_id:
+                    item["project_name"] = project_name
+                    item["description"] = description
+                    item["updated_at"] = updated_at
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError("index.json 内に対象プロジェクトが見つかりません")
+
+            self.save_index(index_data)
+        finally:
+            self.release_lock()
+
+    def remove_project(self, project_id: str):
+        self.acquire_lock()
+        try:
+            index_data = self.load_index()
+            new_index = [item for item in index_data if item.get("project_id") != project_id]
+
+            if len(new_index) == len(index_data):
+                raise ValueError("index.json 内に削除対象プロジェクトが見つかりません")
+
+            self.save_index(new_index)
+        finally:
+            self.release_lock()
+
     def search_projects(
         self,
         name_keyword: str = "",

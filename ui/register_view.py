@@ -7,6 +7,7 @@ class RegisterView(ttk.Frame):
         super().__init__(parent, padding=12)
         self.app = app
         self.selected_files = []
+        self.selected_folders = []
         self.project_name_var = tk.StringVar()
         self._build()
 
@@ -29,14 +30,15 @@ class RegisterView(ttk.Frame):
         self.desc_text = tk.Text(form, height=6, width=60)
         self.desc_text.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(0, 8))
 
-        ttk.Label(form, text="添付ファイル").grid(row=4, column=0, sticky="w")
+        ttk.Label(form, text="追加対象").grid(row=4, column=0, sticky="w")
         file_btns = ttk.Frame(form)
         file_btns.grid(row=5, column=0, columnspan=2, sticky="we", pady=(0, 8))
 
         ttk.Button(file_btns, text="ファイル追加", command=self.add_files).pack(side="left", padx=(0, 4))
-        ttk.Button(file_btns, text="選択削除", command=self.remove_selected_file).pack(side="left")
+        ttk.Button(file_btns, text="フォルダ追加", command=self.add_folder).pack(side="left", padx=(0, 4))
+        ttk.Button(file_btns, text="選択削除", command=self.remove_selected_item).pack(side="left")
 
-        self.file_listbox = tk.Listbox(form, height=10, selectmode=tk.SINGLE)
+        self.file_listbox = tk.Listbox(form, height=12, selectmode=tk.SINGLE)
         self.file_listbox.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=(0, 12))
 
         ttk.Button(form, text="登録", command=self.register_project).grid(row=7, column=1, sticky="e")
@@ -52,32 +54,58 @@ class RegisterView(ttk.Frame):
         for p in paths:
             if p not in self.selected_files:
                 self.selected_files.append(p)
-                self.file_listbox.insert(tk.END, p)
+                self.file_listbox.insert(tk.END, f"[FILE] {p}")
 
-    def remove_selected_file(self):
+    def add_folder(self):
+        path = filedialog.askdirectory(title="フォルダを選択")
+        if not path:
+            return
+
+        if path not in self.selected_folders:
+            self.selected_folders.append(path)
+            self.file_listbox.insert(tk.END, f"[DIR]  {path}")
+
+    def remove_selected_item(self):
         selection = self.file_listbox.curselection()
         if not selection:
             return
 
         idx = selection[0]
+        value = self.file_listbox.get(idx)
         self.file_listbox.delete(idx)
-        self.selected_files.pop(idx)
+
+        if value.startswith("[FILE] "):
+            target = value.replace("[FILE] ", "", 1)
+            if target in self.selected_files:
+                self.selected_files.remove(target)
+        elif value.startswith("[DIR]  "):
+            target = value.replace("[DIR]  ", "", 1)
+            if target in self.selected_folders:
+                self.selected_folders.remove(target)
 
     def register_project(self):
         project_name = self.project_name_var.get().strip()
         description = self.desc_text.get("1.0", tk.END).strip()
 
         try:
-            project_id = self.app.project_service.create_project(
-                project_name,
-                description,
-                self.selected_files,
+            result = self.app.project_service.create_project(
+                project_name=project_name,
+                description=description,
+                file_paths=self.selected_files,
+                folder_paths=self.selected_folders,
             )
         except Exception as e:
             messagebox.showerror("登録エラー", str(e))
             return
 
-        messagebox.showinfo("登録完了", f"プロジェクトを登録しました\n{project_id}")
+        message = (
+            f"プロジェクトを登録しました\n"
+            f"{result['project_id']}\n\n"
+            f"登録ファイル数: {result['copied_count']}\n"
+            f"除外・スキップ件数: {result['skipped_count']}"
+        )
+        messagebox.showinfo("登録完了", message)
+
         self.clear_form()
         self.app.home_view.refresh_status()
 
@@ -86,3 +114,4 @@ class RegisterView(ttk.Frame):
         self.desc_text.delete("1.0", tk.END)
         self.file_listbox.delete(0, tk.END)
         self.selected_files.clear()
+        self.selected_folders.clear()
