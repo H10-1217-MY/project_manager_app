@@ -4,9 +4,16 @@ from pathlib import Path
 from core.file_service import FileService
 from core.index_service import IndexService, PROJECTS_DIR_NAME, TRASH_DIR_NAME
 from core.storage_service import StorageService
-from models.project_model import ProjectIndexEntry
 from utils.id_utils import IdUtils
 from utils.time_utils import TimeUtils
+
+
+STATUS_LIST = [
+    "未着手",
+    "進行中",
+    "保留",
+    "完了",
+]
 
 
 class ProjectService:
@@ -28,7 +35,13 @@ class ProjectService:
             return False, "プロジェクト名を入力してください"
         return True, ""
 
+    def validate_status(self, status: str) -> tuple[bool, str]:
+        if status not in STATUS_LIST:
+            return False, f"不正なステータスです: {status}"
+        return True, ""
+
     def _add_history(self, metadata: dict, action: str, detail: str):
+        metadata.setdefault("history", [])
         metadata["history"].append({
             "timestamp": TimeUtils.now_iso(),
             "action": action,
@@ -67,14 +80,10 @@ class ProjectService:
             "project_id": project_id,
             "project_name": project_name.strip(),
             "description": description.strip(),
-
             "project_path": str(project_path),
-
             "status": "未着手",
-
             "created_at": now,
             "updated_at": now,
-
             "sections": {
                 "overview": "",
                 "requirements": "",
@@ -82,7 +91,6 @@ class ProjectService:
                 "issues": "",
                 "next_actions": ""
             },
-
             "history": [
                 {
                     "timestamp": now,
@@ -90,19 +98,19 @@ class ProjectService:
                     "detail": "プロジェクト作成"
                 }
             ],
-
             "files": [asdict(entry) for entry in all_entries]
         }
         self.storage_service.save_metadata(project_path, metadata)
 
-        index_entry = ProjectIndexEntry(
-            project_id=project_id,
-            project_name=project_name.strip(),
-            description=description.strip(),
-            project_path=str(project_path),
-            created_at=now,
-            updated_at=now,
-        )
+        index_entry = {
+            "project_id": project_id,
+            "project_name": project_name.strip(),
+            "description": description.strip(),
+            "project_path": str(project_path),
+            "status": "未着手",
+            "created_at": now,
+            "updated_at": now,
+        }
         self.index_service.add_project(index_entry)
 
         return {
@@ -123,22 +131,38 @@ class ProjectService:
     def get_project_detail(self, project_path: str) -> dict:
         return self.storage_service.load_metadata(Path(project_path))
 
-    def update_project_info(self, project_path: str, project_name: str, description: str):
+    def update_project_info(
+        self,
+        project_path: str,
+        project_name: str,
+        description: str,
+        status: str = "未着手",
+    ):
         self.ensure_ready()
 
         ok, msg = self.validate_project_input(project_name)
         if not ok:
             raise ValueError(msg)
 
+        ok, msg = self.validate_status(status)
+        if not ok:
+            raise ValueError(msg)
+
         project_dir = Path(project_path)
         metadata = self.storage_service.load_metadata(project_dir)
 
+        old_status = metadata.get("status", "未着手")
         updated_at = TimeUtils.now_iso()
+
         metadata["project_name"] = project_name.strip()
         metadata["description"] = description.strip()
+        metadata["status"] = status
         metadata["updated_at"] = updated_at
 
         self._add_history(metadata, "updated", "プロジェクト情報更新")
+
+        if old_status != status:
+            self._add_history(metadata, "status_changed", f"{old_status} → {status}")
 
         self.storage_service.save_metadata(project_dir, metadata)
 
@@ -147,6 +171,37 @@ class ProjectService:
             project_name=metadata["project_name"],
             description=metadata["description"],
             updated_at=updated_at,
+            status=status,
+        )
+
+    def update_status(self, project_path: str, status: str):
+        self.ensure_ready()
+
+        ok, msg = self.validate_status(status)
+        if not ok:
+            raise ValueError(msg)
+
+        project_dir = Path(project_path)
+        metadata = self.storage_service.load_metadata(project_dir)
+
+        old_status = metadata.get("status", "未着手")
+        if old_status == status:
+            return
+
+        updated_at = TimeUtils.now_iso()
+        metadata["status"] = status
+        metadata["updated_at"] = updated_at
+
+        self._add_history(metadata, "status_changed", f"{old_status} → {status}")
+
+        self.storage_service.save_metadata(project_dir, metadata)
+
+        self.index_service.update_project(
+            project_id=metadata["project_id"],
+            project_name=metadata["project_name"],
+            description=metadata["description"],
+            updated_at=updated_at,
+            status=status,
         )
 
     def delete_project(self, project_path: str) -> Path:

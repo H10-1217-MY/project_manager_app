@@ -35,7 +35,14 @@ class IndexService:
 
     def load_index(self) -> list:
         data = JsonUtils.read_json(self.index_path, default=[])
-        return data if isinstance(data, list) else []
+        if not isinstance(data, list):
+            return []
+
+        # 古いindex.jsonとの互換補完
+        for item in data:
+            item.setdefault("status", "未着手")
+
+        return data
 
     def save_index(self, index_data: list):
         JsonUtils.atomic_write_json(self.index_path, index_data)
@@ -59,16 +66,30 @@ class IndexService:
         except Exception:
             pass
 
-    def add_project(self, entry: ProjectIndexEntry):
+    def add_project(self, entry: dict | ProjectIndexEntry):
         self.acquire_lock()
         try:
             index_data = self.load_index()
-            index_data.append(asdict(entry))
+
+            if isinstance(entry, ProjectIndexEntry):
+                entry_dict = asdict(entry)
+            else:
+                entry_dict = entry
+
+            entry_dict.setdefault("status", "未着手")
+            index_data.append(entry_dict)
             self.save_index(index_data)
         finally:
             self.release_lock()
 
-    def update_project(self, project_id: str, project_name: str, description: str, updated_at: str):
+    def update_project(
+        self,
+        project_id: str,
+        project_name: str,
+        description: str,
+        updated_at: str,
+        status: str | None = None,
+    ):
         self.acquire_lock()
         try:
             index_data = self.load_index()
@@ -79,6 +100,8 @@ class IndexService:
                     item["project_name"] = project_name
                     item["description"] = description
                     item["updated_at"] = updated_at
+                    if status is not None:
+                        item["status"] = status
                     found = True
                     break
 

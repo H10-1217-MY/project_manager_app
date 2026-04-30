@@ -5,6 +5,14 @@ from tkinter import ttk, filedialog, messagebox
 from utils.time_utils import TimeUtils
 
 
+STATUS_LIST = [
+    "未着手",
+    "進行中",
+    "保留",
+    "完了",
+]
+
+
 class EditProjectDialog(tk.Toplevel):
     def __init__(self, parent, app, detail: dict, on_saved):
         super().__init__(parent)
@@ -15,6 +23,7 @@ class EditProjectDialog(tk.Toplevel):
         self.on_saved = on_saved
 
         self.project_name_var = tk.StringVar(value=detail.get("project_name", ""))
+        self.status_var = tk.StringVar(value=detail.get("status", "未着手"))
 
         body = ttk.Frame(self, padding=16)
         body.pack(fill="both", expand=True)
@@ -24,13 +33,22 @@ class EditProjectDialog(tk.Toplevel):
             row=1, column=0, sticky="we", pady=(0, 8)
         )
 
-        ttk.Label(body, text="説明文").grid(row=2, column=0, sticky="w")
+        ttk.Label(body, text="ステータス").grid(row=2, column=0, sticky="w")
+        ttk.Combobox(
+            body,
+            textvariable=self.status_var,
+            values=STATUS_LIST,
+            state="readonly",
+            width=20,
+        ).grid(row=3, column=0, sticky="w", pady=(0, 8))
+
+        ttk.Label(body, text="説明文").grid(row=4, column=0, sticky="w")
         self.desc_text = tk.Text(body, width=60, height=8)
-        self.desc_text.grid(row=3, column=0, sticky="we", pady=(0, 8))
+        self.desc_text.grid(row=5, column=0, sticky="we", pady=(0, 8))
         self.desc_text.insert("1.0", detail.get("description", ""))
 
         btns = ttk.Frame(body)
-        btns.grid(row=4, column=0, sticky="e", pady=(8, 0))
+        btns.grid(row=6, column=0, sticky="e", pady=(8, 0))
         ttk.Button(btns, text="保存", command=self.save).pack(side="left", padx=4)
         ttk.Button(btns, text="閉じる", command=self.destroy).pack(side="left", padx=4)
 
@@ -42,12 +60,14 @@ class EditProjectDialog(tk.Toplevel):
     def save(self):
         project_name = self.project_name_var.get().strip()
         description = self.desc_text.get("1.0", tk.END).strip()
+        status = self.status_var.get().strip()
 
         try:
             self.app.project_service.update_project_info(
                 project_path=self.detail["project_path"],
                 project_name=project_name,
                 description=description,
+                status=status,
             )
         except Exception as e:
             messagebox.showerror("更新エラー", str(e))
@@ -113,6 +133,9 @@ class BrowseView(ttk.Frame):
         self.detail_title = ttk.Label(right, text="プロジェクト未選択", font=("Yu Gothic UI", 13, "bold"))
         self.detail_title.pack(anchor="w")
 
+        self.detail_status = ttk.Label(right, text="")
+        self.detail_status.pack(anchor="w", pady=(4, 0))
+
         self.detail_desc = ttk.Label(right, text="", wraplength=500, justify="left")
         self.detail_desc.pack(anchor="w", pady=(8, 8))
 
@@ -120,8 +143,12 @@ class BrowseView(ttk.Frame):
         self.detail_info.pack(anchor="w", pady=(0, 8))
 
         ttk.Label(right, text="ファイル一覧").pack(anchor="w")
-        self.file_list = tk.Listbox(right, height=15)
+        self.file_list = tk.Listbox(right, height=10)
         self.file_list.pack(fill="both", expand=True, pady=(4, 8))
+
+        ttk.Label(right, text="更新履歴").pack(anchor="w")
+        self.history_list = tk.Listbox(right, height=5)
+        self.history_list.pack(fill="both", expand=False, pady=(4, 8))
 
         file_btns = ttk.Frame(right)
         file_btns.pack(fill="x")
@@ -145,7 +172,8 @@ class BrowseView(ttk.Frame):
 
         self.project_list.delete(0, tk.END)
         for item in self.projects:
-            label = f"{item['project_name']} | {TimeUtils.display(item['updated_at'])}"
+            status = item.get("status", "未着手")
+            label = f"[{status}] {item['project_name']} | {TimeUtils.display(item['updated_at'])}"
             self.project_list.insert(tk.END, label)
 
         self.clear_detail()
@@ -169,6 +197,7 @@ class BrowseView(ttk.Frame):
 
     def show_detail(self, detail: dict):
         self.detail_title.config(text=detail.get("project_name", ""))
+        self.detail_status.config(text=f"ステータス: {detail.get('status', '未着手')}")
         self.detail_desc.config(text=detail.get("description", ""))
 
         info = (
@@ -183,12 +212,29 @@ class BrowseView(ttk.Frame):
             text = f"{file_info['relative_path']} ({file_info['size']} bytes)"
             self.file_list.insert(tk.END, text)
 
+        self.history_list.delete(0, tk.END)
+        history = detail.get("history", [])
+
+        if not history:
+            self.history_list.insert(tk.END, "履歴なし")
+            return
+
+        # 新しい履歴を上に出す
+        for item in reversed(history):
+            timestamp = TimeUtils.display(item.get("timestamp", ""))
+            action = item.get("action", "")
+            detail_text = item.get("detail", "")
+            text = f"{timestamp} | {action} | {detail_text}"
+            self.history_list.insert(tk.END, text)
+
     def clear_detail(self):
         self.current_detail = None
         self.detail_title.config(text="プロジェクト未選択")
+        self.detail_status.config(text="")
         self.detail_desc.config(text="")
         self.detail_info.config(text="")
         self.file_list.delete(0, tk.END)
+        self.history_list.delete(0, tk.END)
 
     def download_selected_file(self):
         if not self.current_detail:
