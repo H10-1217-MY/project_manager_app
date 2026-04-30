@@ -20,7 +20,11 @@ class HomeView(ttk.Frame):
         self._build()
 
     def _build(self):
-        ttk.Label(self, text=APP_TITLE, font=("Yu Gothic UI", 18, "bold")).pack(pady=(0, 20))
+        ttk.Label(
+            self,
+            text=APP_TITLE,
+            font=("Yu Gothic UI", 18, "bold")
+        ).pack(pady=(0, 20))
 
         status_frame = ttk.LabelFrame(self, text="共有フォルダ状態", padding=12)
         status_frame.pack(fill="x", pady=(0, 16))
@@ -35,6 +39,10 @@ class HomeView(ttk.Frame):
         ttk.Button(btn_frame, text="終了", command=self.app.root.destroy).pack(fill="x", pady=4)
 
     def refresh_status(self):
+        if self.app.project_service is None:
+            self.status_var.set("共有フォルダが未設定です。設定画面から指定してください。")
+            return
+
         try:
             self.app.project_service.ensure_ready()
             self.status_var.set("共有フォルダに接続済み")
@@ -57,11 +65,15 @@ class SettingsDialog(tk.Toplevel):
         body.pack(fill="both", expand=True)
 
         ttk.Label(body, text="共有フォルダパス").grid(row=0, column=0, sticky="w")
-        ttk.Entry(body, textvariable=self.shared_root_var, width=60).grid(row=1, column=0, sticky="we", padx=(0, 8))
+        ttk.Entry(body, textvariable=self.shared_root_var, width=60).grid(
+            row=1, column=0, sticky="we", padx=(0, 8)
+        )
         ttk.Button(body, text="参照", command=self._browse_shared_root).grid(row=1, column=1, sticky="e")
 
         ttk.Label(body, text="既定の保存先").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        ttk.Entry(body, textvariable=self.download_var, width=60).grid(row=3, column=0, sticky="we", padx=(0, 8))
+        ttk.Entry(body, textvariable=self.download_var, width=60).grid(
+            row=3, column=0, sticky="we", padx=(0, 8)
+        )
         ttk.Button(body, text="参照", command=self._browse_download_root).grid(row=3, column=1, sticky="e")
 
         btns = ttk.Frame(body)
@@ -89,8 +101,10 @@ class SettingsDialog(tk.Toplevel):
             "shared_root_path": self.shared_root_var.get().strip(),
             "default_download_path": self.download_var.get().strip(),
         }
+
         self.config_service.save_config(config)
         self.on_saved(config)
+
         messagebox.showinfo("設定", "設定を保存しました")
         self.destroy()
 
@@ -104,8 +118,7 @@ class App:
         self.config_service = ConfigService(Path(CONFIG_FILE))
         self.config = self.config_service.load_config()
 
-        shared_root = self.config.get("shared_root_path", "").strip()
-        self.project_service = ProjectService(Path(shared_root) if shared_root else Path("."))
+        self.project_service = self._create_project_service()
 
         self.container = ttk.Frame(root)
         self.container.pack(fill="both", expand=True)
@@ -122,20 +135,45 @@ class App:
 
         self.show_home()
 
-    def refresh_services(self):
+    def _create_project_service(self):
         shared_root = self.config.get("shared_root_path", "").strip()
-        self.project_service = ProjectService(Path(shared_root) if shared_root else Path("."))
+
+        if not shared_root:
+            return None
+
+        return ProjectService(Path(shared_root))
+
+    def refresh_services(self):
+        self.project_service = self._create_project_service()
         self.home_view.refresh_status()
-        self.browse_view.refresh_list()
+
+        if self.project_service is not None:
+            self.browse_view.refresh_list()
+        else:
+            self.browse_view.clear_detail()
 
     def show_home(self):
         self.home_view.refresh_status()
         self.home_view.tkraise()
 
     def show_register(self):
+        if self.project_service is None:
+            messagebox.showwarning(
+                "設定不足",
+                "先に共有フォルダを設定してください。"
+            )
+            return
+
         self.register_view.tkraise()
 
     def show_browse(self):
+        if self.project_service is None:
+            messagebox.showwarning(
+                "設定不足",
+                "先に共有フォルダを設定してください。"
+            )
+            return
+
         self.browse_view.refresh_list()
         self.browse_view.tkraise()
 
